@@ -102,6 +102,7 @@ System.register(["app/plugins/sdk", "lodash", "app/core/time_series2", "app/core
 					_this.aggregations = ['Last', 'First', 'Max', 'Min', 'Sum', 'Avg', 'Delta'];
 					_this.displayTypes = ['Regular', 'Annotation'];
 					_this.colorModes = ['Panel', 'Metric', 'Disabled'];
+					_this.display_metric = true;
 
 					// Dates get stored as strings and will need to be converted back to a Date objects
 					_.each(_this.panel.targets, function (t) {
@@ -306,6 +307,7 @@ System.register(["app/plugins/sdk", "lodash", "app/core/time_series2", "app/core
 							s.url = target.url;
 							s.display = true;
 							s.displayType = target.displayType;
+							s.display_metric = target.display_metric;
 							s.valueDisplayRegex = "";
 
 							if (_this5.validateRegex(target.valueDisplayRegex)) {

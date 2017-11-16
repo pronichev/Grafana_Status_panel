@@ -37,6 +37,7 @@ export class StatusPluginCtrl extends MetricsPanelCtrl {
 		this.aggregations = ['Last', 'First', 'Max', 'Min', 'Sum', 'Avg', 'Delta'];
 		this.displayTypes = ['Regular', 'Annotation'];
 		this.colorModes = ['Panel', 'Metric', 'Disabled'];
+		this.display_metric = true;
 
 		// Dates get stored as strings and will need to be converted back to a Date objects
 		_.each(this.panel.targets, (t) => {
@@ -224,6 +225,7 @@ export class StatusPluginCtrl extends MetricsPanelCtrl {
 			s.url = target.url;
 			s.display = true;
 			s.displayType = target.displayType;
+			s.display_metric = target.display_metric;
 			s.valueDisplayRegex = "";
 
 			if(this.validateRegex(target.valueDisplayRegex)) {
