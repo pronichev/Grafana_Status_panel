@@ -21,7 +21,8 @@ const panelDefaults = {
 	},
 	isGrayOnNoData: false,
 	isIgnoreOKColors: false,
-	isHideAlertsOnDisable: false
+	isHideAlertsOnDisable: false,
+	cornerRadius: 0
 };
 
 export class StatusPluginCtrl extends MetricsPanelCtrl {
@@ -36,7 +37,10 @@ export class StatusPluginCtrl extends MetricsPanelCtrl {
 		this.valueHandlers = ['Number Threshold', 'String Threshold', 'Date Threshold', 'Disable Criteria', 'Text Only'];
 		this.aggregations = ['Last', 'First', 'Max', 'Min', 'Sum', 'Avg', 'Delta'];
 		this.displayTypes = ['Regular', 'Annotation'];
+		this.displayAliasTypes = ['Warning / Critical', 'Always'];
+		this.displayValueTypes = ['Never', 'When Alias Displayed', 'Warning / Critical', 'Critical Only'];
 		this.colorModes = ['Panel', 'Metric', 'Disabled'];
+		this.fontFormats = ['Regular', 'Bold', 'Italic'];
 
 		// Dates get stored as strings and will need to be converted back to a Date objects
 		_.each(this.panel.targets, (t) => {
@@ -222,7 +226,7 @@ export class StatusPluginCtrl extends MetricsPanelCtrl {
 
 			s.alias = target.alias;
 			s.url = target.url;
-			s.display = true;
+			s.isDisplayValue = true;
 			s.displayType = target.displayType;
 			s.valueDisplayRegex = "";
 
@@ -295,11 +299,22 @@ export class StatusPluginCtrl extends MetricsPanelCtrl {
 		//Handle legacy code
 		_.each(targets, (target) => {
 			if(target.valueHandler == null) {
-				target.valueHandler = target.displayType;
-				if(target.valueHandler == "Annotation") {
-					target.valueHandler = "Text Only"
+				if(target.displayType != null) {
+					target.valueHandler = target.displayType;
+					if (target.valueHandler == "Annotation") {
+						target.valueHandler = "Text Only"
+					}
+				} else {
+					target.valueHandler = this.valueHandlers[0]
 				}
 				target.displayType = this.displayTypes[0];
+			}
+
+			if(target.display != null){
+				target.displayAliasType = target.display ? "Always" : this.displayAliasTypes[0];
+				target.displayValueWithAlias = target.display ? 'When Alias Displayed' : this.displayValueTypes[0];
+				delete target.display;
+
 			}
 		});
 
@@ -324,7 +339,6 @@ export class StatusPluginCtrl extends MetricsPanelCtrl {
 	handleThresholdStatus(series, target) {
 		series.thresholds = StatusPluginCtrl.parseThresholds(target);
 		series.inverted = series.thresholds.crit < series.thresholds.warn;
-		series.display = target.display;
 
 		let isCritical = false;
 		let isWarning = false;
@@ -354,13 +368,22 @@ export class StatusPluginCtrl extends MetricsPanelCtrl {
 		// Add units-of-measure and decimal formatting or date formatting as needed
 		series.display_value = this.formatDisplayValue(series.display_value, target);
 
+		let displayValueWhenAliasDisplayed = 'When Alias Displayed' === target.displayValueWithAlias;
+		let displayValueFromWarning = 'Warning / Critical' === target.displayValueWithAlias;
+		let displayValueFromCritical = 'Critical Only' === target.displayValueWithAlias;
+
 		if(isCritical) {
+			//In critical state we don't show the error as annotation
+			series.displayType = this.displayTypes[0];
+			series.isDisplayValue = displayValueWhenAliasDisplayed || displayValueFromWarning || displayValueFromCritical;
 			this.crit.push(series);
-			series.displayType = this.displayTypes[0]
 		} else if(isWarning) {
+			//In warning state we don't show the warning as annotation
+			series.displayType = this.displayTypes[0];
+			series.isDisplayValue = displayValueWhenAliasDisplayed || displayValueFromWarning;
 			this.warn.push(series);
-			series.displayType = this.displayTypes[0]
-		} else if (series.display) {
+		} else if ("Always" == target.displayAliasType) {
+			series.isDisplayValue = displayValueWhenAliasDisplayed;
 			if(series.displayType == "Annotation") {
 				this.annotation.push(series);
 			} else {
@@ -374,8 +397,9 @@ export class StatusPluginCtrl extends MetricsPanelCtrl {
 		if (target.valueHandler === "Number Threshold") {
 			if (_.isFinite(value)) {
 				let units = (typeof target.units === "string") ? target.units : 'none';
-				let decimals = (Math.floor(value) === value) ? 0 : value.toString().split(".")[1].length;
-				decimals = (typeof target.decimals === "number") ? target.decimals : decimals;
+				let decimals = this.decimalPlaces(value);
+				// We define the decimal percision by the minimal decimal needed
+				decimals = (typeof target.decimals === "number") ? Math.min(target.decimals, decimals) : decimals;
 				value = kbn.valueFormats[units](value, decimals, null);
 			} else {
 				value = "Invalid Number";
@@ -393,6 +417,17 @@ export class StatusPluginCtrl extends MetricsPanelCtrl {
 			}
 		}
 		return value;
+	}
+
+	decimalPlaces(num) {
+		var match = (''+num).match(/(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/);
+		if (!match) { return 0; }
+		return Math.max(
+			0,
+			// Number of digits right of decimal point.
+			(match[1] ? match[1].length : 0)
+			// Adjust for scientific notation.
+			- (match[2] ? +match[2] : 0));
 	}
 
 	handleDisabledStatus(series, target) {
@@ -431,6 +466,9 @@ export class StatusPluginCtrl extends MetricsPanelCtrl {
 	handleCssDisplay() {
 		this.$panelContainer.removeClass('error-state warn-state disabled-state ok-state no-data-state');
 		this.$panelContainer.addClass(this.panelState);
+
+		let radius = _.isNumber(this.panel.cornerRadius) ? this.panel.cornerRadius : 0
+		this.$panelContainer.css('border-radius', radius + '%');
 
 		let okColor = (this.panel.isIgnoreOKColors) ? '' : this.panel.colors.ok;
 

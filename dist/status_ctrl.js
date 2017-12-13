@@ -81,7 +81,8 @@ System.register(["app/plugins/sdk", "lodash", "app/core/time_series2", "app/core
 				},
 				isGrayOnNoData: false,
 				isIgnoreOKColors: false,
-				isHideAlertsOnDisable: false
+				isHideAlertsOnDisable: false,
+				cornerRadius: 0
 			};
 
 			_export("StatusPluginCtrl", StatusPluginCtrl = function (_MetricsPanelCtrl) {
@@ -101,7 +102,10 @@ System.register(["app/plugins/sdk", "lodash", "app/core/time_series2", "app/core
 					_this.valueHandlers = ['Number Threshold', 'String Threshold', 'Date Threshold', 'Disable Criteria', 'Text Only'];
 					_this.aggregations = ['Last', 'First', 'Max', 'Min', 'Sum', 'Avg', 'Delta'];
 					_this.displayTypes = ['Regular', 'Annotation'];
+					_this.displayAliasTypes = ['Warning / Critical', 'Always'];
+					_this.displayValueTypes = ['Never', 'When Alias Displayed', 'Warning / Critical', 'Critical Only'];
 					_this.colorModes = ['Panel', 'Metric', 'Disabled'];
+					_this.fontFormats = ['Regular', 'Bold', 'Italic'];
 
 					// Dates get stored as strings and will need to be converted back to a Date objects
 					_.each(_this.panel.targets, function (t) {
@@ -304,7 +308,7 @@ System.register(["app/plugins/sdk", "lodash", "app/core/time_series2", "app/core
 
 							s.alias = target.alias;
 							s.url = target.url;
-							s.display = true;
+							s.isDisplayValue = true;
 							s.displayType = target.displayType;
 							s.valueDisplayRegex = "";
 
@@ -382,11 +386,21 @@ System.register(["app/plugins/sdk", "lodash", "app/core/time_series2", "app/core
 						//Handle legacy code
 						_.each(targets, function (target) {
 							if (target.valueHandler == null) {
-								target.valueHandler = target.displayType;
-								if (target.valueHandler == "Annotation") {
-									target.valueHandler = "Text Only";
+								if (target.displayType != null) {
+									target.valueHandler = target.displayType;
+									if (target.valueHandler == "Annotation") {
+										target.valueHandler = "Text Only";
+									}
+								} else {
+									target.valueHandler = _this6.valueHandlers[0];
 								}
 								target.displayType = _this6.displayTypes[0];
+							}
+
+							if (target.display != null) {
+								target.displayAliasType = target.display ? "Always" : _this6.displayAliasTypes[0];
+								target.displayValueWithAlias = target.display ? 'When Alias Displayed' : _this6.displayValueTypes[0];
+								delete target.display;
 							}
 						});
 
@@ -412,7 +426,6 @@ System.register(["app/plugins/sdk", "lodash", "app/core/time_series2", "app/core
 					value: function handleThresholdStatus(series, target) {
 						series.thresholds = StatusPluginCtrl.parseThresholds(target);
 						series.inverted = series.thresholds.crit < series.thresholds.warn;
-						series.display = target.display;
 
 						var isCritical = false;
 						var isWarning = false;
@@ -442,13 +455,22 @@ System.register(["app/plugins/sdk", "lodash", "app/core/time_series2", "app/core
 						// Add units-of-measure and decimal formatting or date formatting as needed
 						series.display_value = this.formatDisplayValue(series.display_value, target);
 
+						var displayValueWhenAliasDisplayed = 'When Alias Displayed' === target.displayValueWithAlias;
+						var displayValueFromWarning = 'Warning / Critical' === target.displayValueWithAlias;
+						var displayValueFromCritical = 'Critical Only' === target.displayValueWithAlias;
+
 						if (isCritical) {
+							//In critical state we don't show the error as annotation
+							series.displayType = this.displayTypes[0];
+							series.isDisplayValue = displayValueWhenAliasDisplayed || displayValueFromWarning || displayValueFromCritical;
 							this.crit.push(series);
-							series.displayType = this.displayTypes[0];
 						} else if (isWarning) {
-							this.warn.push(series);
+							//In warning state we don't show the warning as annotation
 							series.displayType = this.displayTypes[0];
-						} else if (series.display) {
+							series.isDisplayValue = displayValueWhenAliasDisplayed || displayValueFromWarning;
+							this.warn.push(series);
+						} else if ("Always" == target.displayAliasType) {
+							series.isDisplayValue = displayValueWhenAliasDisplayed;
 							if (series.displayType == "Annotation") {
 								this.annotation.push(series);
 							} else {
@@ -463,8 +485,9 @@ System.register(["app/plugins/sdk", "lodash", "app/core/time_series2", "app/core
 						if (target.valueHandler === "Number Threshold") {
 							if (_.isFinite(value)) {
 								var units = typeof target.units === "string" ? target.units : 'none';
-								var decimals = Math.floor(value) === value ? 0 : value.toString().split(".")[1].length;
-								decimals = typeof target.decimals === "number" ? target.decimals : decimals;
+								var decimals = this.decimalPlaces(value);
+								// We define the decimal percision by the minimal decimal needed
+								decimals = typeof target.decimals === "number" ? Math.min(target.decimals, decimals) : decimals;
 								value = kbn.valueFormats[units](value, decimals, null);
 							} else {
 								value = "Invalid Number";
@@ -481,6 +504,19 @@ System.register(["app/plugins/sdk", "lodash", "app/core/time_series2", "app/core
 							}
 						}
 						return value;
+					}
+				}, {
+					key: "decimalPlaces",
+					value: function decimalPlaces(num) {
+						var match = ('' + num).match(/(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/);
+						if (!match) {
+							return 0;
+						}
+						return Math.max(0,
+						// Number of digits right of decimal point.
+						(match[1] ? match[1].length : 0) - (
+						// Adjust for scientific notation.
+						match[2] ? +match[2] : 0));
 					}
 				}, {
 					key: "handleDisabledStatus",
@@ -523,6 +559,9 @@ System.register(["app/plugins/sdk", "lodash", "app/core/time_series2", "app/core
 					value: function handleCssDisplay() {
 						this.$panelContainer.removeClass('error-state warn-state disabled-state ok-state no-data-state');
 						this.$panelContainer.addClass(this.panelState);
+
+						var radius = _.isNumber(this.panel.cornerRadius) ? this.panel.cornerRadius : 0;
+						this.$panelContainer.css('border-radius', radius + '%');
 
 						var okColor = this.panel.isIgnoreOKColors ? '' : this.panel.colors.ok;
 
